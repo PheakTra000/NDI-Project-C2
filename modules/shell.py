@@ -25,8 +25,8 @@ def run_shell(manager, agent_id, c2_server):
             print("[!] Agent not found")
             break
 
-        for _ in range(60):
-            time.sleep(0.5)
+        for _ in range(30):
+            time.sleep(0.3)
             results = manager.get_results(agent_id)
             for r in results:
                 if r["task_id"] == task_id:

