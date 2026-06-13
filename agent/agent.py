@@ -197,6 +197,10 @@ def execute_shell_interactive(command):
             pass
         elif init.startswith("SHELL:error:"):
             return init
+    else:
+        os.write(_pty_fd, b"\x03")
+        time.sleep(0.2)
+        _read_pty(0.3)
     result_b64 = exec_shell_cmd(base64.b64encode(command.encode()).decode())
     try:
         return base64.b64decode(result_b64).decode(errors="replace")
