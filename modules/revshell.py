@@ -41,6 +41,10 @@ def _terminal_size():
         return 80, 24
 
 
+def strip_ansi(text):
+    return re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
+
+
 def _pty_bridge(conn):
     addr = conn.getpeername()
     _write(f"{Fore.GREEN}[+] TCP shell from {addr}{Style.RESET_ALL}\n")
@@ -51,12 +55,8 @@ def _pty_bridge(conn):
 
     try:
         tty.setraw(0)
-
-        def _sigwinch(s, f):
-            pass
-
-        signal.signal(signal.SIGWINCH, _sigwinch)
         signal.signal(signal.SIGINT, signal.SIG_IGN)
+        buf = b""
 
         while True:
             r, _, _ = select.select([conn, 0], [], [])
@@ -64,7 +64,8 @@ def _pty_bridge(conn):
                 d = conn.recv(4096)
                 if not d:
                     break
-                os.write(1, d)
+                cleaned = strip_ansi(d.decode(errors="replace")).encode(errors="replace")
+                os.write(1, cleaned)
             if 0 in r:
                 d = os.read(0, 4096)
                 if not d:
