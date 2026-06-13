@@ -1,6 +1,7 @@
-__pycache__/
-*.pyc
-venv/
+.agent_id
 .c2_history
 downloads/
+*.pyc
+__pycache__/
 testpw
+venv/
