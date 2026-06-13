@@ -18,10 +18,12 @@ class C2Server:
         self.thread = None
         self.running = False
 
-    def start(self, log_buffer=None, public_url=None, token=""):
+    def start(self, log_buffer=None, public_url=None, token="", rs_host="localhost", rs_port="4444"):
         C2Handler.manager = self.manager
         C2Handler.log_buffer = log_buffer
         C2Handler.server_token = token
+        C2Handler.server_rs_host = rs_host
+        C2Handler.server_rs_port = str(rs_port)
         if public_url:
             C2Handler.server_url = public_url
         self.server = ThreadedHTTPServer((self.host, self.port), C2Handler)

