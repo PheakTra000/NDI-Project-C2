@@ -1,4 +1,10 @@
+import base64
 import time
+import re
+
+
+def strip_ansi(text):
+    return re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
 
 
 def run_shell(manager, agent_id, c2_server):
@@ -39,3 +45,20 @@ def run_shell(manager, agent_id, c2_server):
             break
         else:
             print("[!] Timeout")
+
+        # Drain SHELL_DRAIN results while idle
+        for _ in range(4):
+            time.sleep(0.3)
+            results = manager.get_results(agent_id)
+            for r in results:
+                out = r.get("output", "")
+                if out.startswith("SHELL_DRAIN:"):
+                    try:
+                        data = strip_ansi(
+                            base64.b64decode(out[12:]).decode(errors="replace")
+                        )
+                        if data.strip():
+                            print(data, end="")
+                    except Exception:
+                        pass
+                    r["output"] = ""
