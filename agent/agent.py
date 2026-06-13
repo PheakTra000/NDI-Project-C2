@@ -107,9 +107,17 @@ persistent_master = None
 persistent_pid = None
 
 
+def _pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 def get_persistent_shell():
     global persistent_shell, persistent_master, persistent_pid
-    if persistent_shell is None or persistent_shell.poll() is not None:
+    if persistent_shell is None or not _pid_alive(persistent_shell):
         master_fd, slave_fd = pty.openpty()
 
         winsize = struct.pack("HHHH", 80, 24, 0, 0)
