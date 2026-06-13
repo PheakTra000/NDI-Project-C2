@@ -102,7 +102,7 @@ def _fast_http_shell(manager, agent_id):
                     if lines and lines[0].strip() == cmd.strip():
                         out = "\n".join(lines[1:])
                     if out.rstrip():
-                        _write(out if out.endswith("\n") else out + "\n")
+                        _write(out.rstrip("\r\n") + "\n")
                     break
             else:
                 continue
@@ -115,7 +115,8 @@ def _fast_http_shell(manager, agent_id):
                 if out.startswith("SHELL_DRAIN:"):
                     try:
                         data = strip_ansi(base64.b64decode(out[12:]).decode())
-                        if data.strip():
+                        data = data.lstrip("\r\n ")
+                        if data:
                             _write(data)
                     except Exception:
                         pass
