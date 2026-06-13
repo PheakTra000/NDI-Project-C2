@@ -112,6 +112,12 @@ def handle_shell():
         pid, fd = pty.fork()
         if pid == 0:
             os.execve("/bin/sh", ["/bin/sh", "-i"], os.environ)
+        try:
+            import fcntl, struct, termios
+            ws = struct.pack("HHHH", 80, 24, 0, 0)
+            fcntl.ioctl(fd, termios.TIOCSWINSZ, ws)
+        except Exception:
+            pass
         _pty_fd = fd
         out = _read_pty(1)
         return "SHELL:ready:" + base64.b64encode(out).decode()
