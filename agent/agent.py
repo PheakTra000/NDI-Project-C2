@@ -171,6 +171,13 @@ def execute_shell(command):
 
 
 def execute_shell_interactive(command):
+    global _pty_fd
+    if _pty_fd is None:
+        init = handle_shell()
+        if init.startswith("SHELL:ready:"):
+            pass
+        elif init.startswith("SHELL:error:"):
+            return init
     result_b64 = exec_shell_cmd(base64.b64encode(command.encode()).decode())
     try:
         return base64.b64decode(result_b64).decode(errors="replace")
