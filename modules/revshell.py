@@ -1,7 +1,7 @@
 import base64
 import time
 import re
-from colorama import Fore
+from colorama import Fore, Style
 
 
 def strip_ansi(text):
@@ -9,9 +9,9 @@ def strip_ansi(text):
 
 
 def revshell(manager, agent_id, c2_server):
-    print(f"{Fore.CYAN}[*] Real-time PTY shell (HTTP polling with drain){Fore.RESET_ALL}")
-    print(f"{Fore.CYAN}[*] Agent spawns /bin/sh -i via PTY, streams output continuously{Fore.RESET_ALL}")
-    print(f"{Fore.CYAN}[*] Type 'exit' to return{Fore.RESET_ALL}")
+    print(f"{Fore.CYAN}[*] Real-time PTY shell (HTTP polling with drain){Style.RESET_ALL}")
+    print(f"{Fore.CYAN}[*] Agent spawns /bin/sh -i via PTY, streams output continuously{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}[*] Type 'exit' to return{Style.RESET_ALL}")
     print()
 
     while True:
